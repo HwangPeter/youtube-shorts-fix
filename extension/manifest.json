@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shorts Wrong-Video Fix",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Fixes YouTube Shorts showing the previous Short's still frame while the correct Short plays off-screen.",
   "content_scripts": [
     {
