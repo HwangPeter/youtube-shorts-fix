@@ -2,6 +2,7 @@
   "name": "yt-shorts-fix",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Fixes YouTube Shorts showing the previous Short's still frame while the correct Short plays off-screen.",
   "type": "module",
   "scripts": {

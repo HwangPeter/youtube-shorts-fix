@@ -43,6 +43,7 @@ const header = `// ==UserScript==
 // @namespace    ${manifest.browser_specific_settings.gecko.id}
 // @version      ${manifest.version}
 // @description  ${manifest.description}
+// @license      MIT
 // @match        https://www.youtube.com/*
 // @match        https://m.youtube.com/*
 // @run-at       document-start

@@ -218,4 +218,4 @@ test/proof.mjs             runs every test mode and checks each gives the expect
 
 ## License
 
-See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
