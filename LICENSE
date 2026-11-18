@@ -1,0 +1,14 @@
+LICENSE: NOT YET CHOSEN
+
+No license has been granted yet. All rights reserved by the author until a
+license is picked. This file is a placeholder for that decision.
+
+Common choices for a small browser add-on, for when it is published:
+- MIT: shortest permissive license; anyone may reuse, including in closed
+  forks. Most common for userscripts and small extensions.
+- MPL-2.0: Mozilla's license; changes to these files must stay open, but they
+  can be combined with other code. Natural fit for a Firefox add-on.
+- GPL-3.0: any redistributed derivative must be fully open source under GPL.
+
+AMO asks for a license when an add-on is listed publicly. Unlisted (private)
+signing does not need one.

@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Shorts Wrong-Video Fix",
+  "version": "0.1.0",
+  "description": "Fixes YouTube Shorts showing the previous Short's still frame while the correct Short plays off-screen.",
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*", "https://m.youtube.com/*"],
+      "js": ["shorts-fix.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "shorts-wrong-video-fix@local",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": { "required": ["none"] }
+    }
+  }
+}

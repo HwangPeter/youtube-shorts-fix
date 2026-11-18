@@ -1,0 +1,16 @@
+{
+  "name": "yt-shorts-fix",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fixes YouTube Shorts showing the previous Short's still frame while the correct Short plays off-screen.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test:repro": "node scripts/build.mjs && node test/repro.mjs",
+    "test:proof": "node scripts/build.mjs && node test/proof.mjs",
+    "package": "node scripts/build.mjs && npx --yes web-ext@8 build --source-dir dist/extension --artifacts-dir dist --overwrite-dest"
+  },
+  "devDependencies": {
+    "puppeteer-core": "24.10.0"
+  }
+}
