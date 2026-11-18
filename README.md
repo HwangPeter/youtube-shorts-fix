@@ -1,35 +1,52 @@
-# Shorts Wrong-Video Fix
+# YouTube Shorts Wrong-Video Fix
 
-A small private Firefox add-on, also built as a userscript, that fixes YouTube Shorts showing the wrong video. Normal Shorts scrolling is unchanged.
+A small browser add-on, also built as a userscript, that fixes YouTube Shorts showing the wrong video. Normal Shorts scrolling is unchanged.
 
-## What it fixes
+This project is not affiliated with YouTube or Google.
 
-You open a Short from a channel's Shorts grid, press Back, then open a different Short. The address bar, the player and the audio are all on the new Short (B). The screen stays on a still frame of the previous Short (A), with no title or buttons. B is playing off-screen, one slot below. Pressing Down then skips B.
+## The problem
 
-- **Firefox:** breaks as soon as the second Short opens.
-- **Chrome:** breaks on the first Down key after that.
+1. Open a Short from a channel's Shorts tab (A).
+2. Press Back.
+3. Open a different Short from the same tab (B).
 
-### Cause
+The address bar, the player and the audio are all on B. The screen stays on a still frame of A, with no title or buttons. B is playing off-screen, one slot below. Pressing Down then skips B.
 
-This is a bug in YouTube's Shorts code, not in Firefox. YouTube has a one-time "re-align after fullscreen/resize" scroll correction, gated by the `shouldUpdateItemHeight` property of the `<ytd-shorts>` element. It writes:
+- **Firefox:** breaks as soon as B opens.
+- **Chrome and Edge:** B opens correctly, then the first Down key snaps the screen back to A's still frame while B keeps playing.
+
+## Why it happens
+
+The bug is in YouTube's Shorts page, not in the browser. Firefox just hits it sooner.
+
+**How the page is built.** The Shorts page is a scrollable list of slots, one per Short. There is only one real video player. YouTube moves it into the slot of the Short you are watching; every other slot only shows a thumbnail.
+
+**Earlier Shorts get inserted above.** When you re-enter Shorts from a channel's grid, YouTube inserts the earlier Short(s) above the current one, as "previous" slots.
+
+**The faulty correction.** YouTube has a one-time scroll correction, meant to re-align the list after a fullscreen or size change. It is switched on by a flag, `shouldUpdateItemHeight`, on the `<ytd-shorts>` element. When it runs, it sets:
 
 ```js
 scrollTop = index * itemHeight + 16
 ```
 
-That formula ignores the "previous" Shorts YouTube inserts above the current one when you re-enter Shorts. So the correction scrolls one or more slots too high, onto a slot that only holds a thumbnail.
+That formula leaves out the previous slots. YouTube's code for reading the scroll position does subtract them; this code for writing it does not.
 
-The investigation report has the evidence: `firstmate/data/yt-shorts-wrong-video/report.md`.
+**The result.** With one previous Short above, the correction scrolls one slot too high, onto A's thumbnail. The player stays in B's slot. YouTube thinks it is already showing B, so nothing ever corrects it.
 
-## How it works
+**When it fires.** The flag starts out on, and every fullscreen change turns it on again. It fires at the first scroll that happens while previous slots exist.
 
-The script is a single file, `src/shorts-fix.js`. It runs in the page's own JavaScript context on `youtube.com`.
+**Why Firefox and Chromium differ.** They handle the scroll position differently when slots are inserted above the visible one.
+- In Firefox, YouTube's own scroll to B triggers the correction immediately.
+- In Chromium, no scroll happens on open. The correction stays on until your next scroll, such as the Down key.
 
-1. **Primary fix: prevents the bug.** It keeps `<ytd-shorts>.shouldUpdateItemHeight` false, so the faulty branch never runs.
-   - The faulty branch only runs in an animation frame queued by YouTube's scroll listener on `#shorts-container`.
-   - The script clears the flag in a capture-phase `scroll` listener, which runs before YouTube's listener.
-   - It clears the flag again after `fullscreenchange`, where YouTube re-arms it, and on `yt-navigate-finish`.
-   - YouTube's separate resize handler still re-aligns the view, and does it correctly.
+## How the fix works
+
+All the logic is in `src/shorts-fix.js`, which runs inside the YouTube page.
+
+1. **Primary fix: prevents the bug.** It keeps `<ytd-shorts>.shouldUpdateItemHeight` false, so the faulty correction never runs.
+   - The correction only runs in an animation frame queued by YouTube's scroll listener on `#shorts-container`. The script clears the flag in a capture-phase `scroll` listener, which runs before YouTube's.
+   - It also clears the flag after `fullscreenchange`, where YouTube turns it back on, and on `yt-navigate-finish`.
+   - YouTube's separate resize handler still re-aligns the view after a size change, and does it correctly.
 2. **Fallback watchdog: repairs the view if a YouTube update gets past the primary fix.**
    - Every 250 ms on `/shorts/` pages, it compares two slots: the slot centred in `#shorts-container`, and the slot holding the player (`#reel-overlay-container`).
    - It acts only when all of these hold:
@@ -39,133 +56,166 @@ The script is a single file, `src/shorts-fix.js`. It runs in the page's own Java
      - The page is not in fullscreen.
      - The player's slot holds the Short named in the URL (checked by its thumbnail's video id).
    - It then scrolls the player's slot back into view. It never touches the player.
-   - **Why the URL check matters:** during a normal move, YouTube can scroll to the new Short a moment before it moves the player out of the old slot. Scrolling back to the old slot would make YouTube navigate back to the old Short.
+   - **Why the URL check matters:** during a normal move, YouTube can scroll to the new Short a moment before it moves the player out of the old slot. Scrolling back to the old slot at that moment would make YouTube navigate back to the old Short.
 3. **Guardrails.**
-   - Every YouTube property and selector is feature-detected. If anything is missing, the script does nothing.
-   - It changes only the one flag and the Shorts container's scroll position.
+   - Every YouTube property and selector is feature-detected. If anything is missing, the script does nothing, so a YouTube redesign cannot break playback.
+   - It changes only that one flag and the Shorts list's scroll position.
    - It sets two properties on the page's `window`:
-     - `__ytShortsFixLoaded` makes it run only once when both the add-on and the userscript are installed.
-     - `__ytShortsFixCorrections` counts watchdog corrections. You can read it in the console to see whether the watchdog has acted.
+     - `__ytShortsFixLoaded` makes it run only once if both the add-on and the userscript are installed.
+     - `__ytShortsFixCorrections` counts watchdog corrections. Read it in the browser console to see whether the watchdog has acted.
 
 ### Privacy and permissions
 
 - No network requests, storage, messaging, analytics or data collection.
-- The manifest asks for no permissions. Its only host access is the content-script match for `https://www.youtube.com/*` and `https://m.youtube.com/*`.
-- The manifest declares `data_collection_permissions: none`.
+- The add-on asks for no permissions. Its only site access is `https://www.youtube.com/*` and `https://m.youtube.com/*`, where its script runs.
+- The manifest declares `data_collection_permissions: none` for Firefox.
 
-## Layout
+## Build
 
+You need Node 18 or newer.
+
+```sh
+npm install
+npm run build
 ```
-src/shorts-fix.js          the only source of the fix
-extension/manifest.json    MV3 manifest (Firefox 140+; also valid MV3 for Chrome)
-scripts/build.mjs          builds dist/extension, dist/shorts-fix.user.js and the two test-only builds
-test/repro.mjs             visible-browser Firefox reproduction test
-test/proof.mjs             runs every test mode and checks each gives the expected result
-```
 
-Build with `npm install && npm run build` (Node 18+). The built files go in `dist/`, which is not committed.
+This writes:
+- `dist/extension/`: the add-on, unpacked.
+- `dist/shorts-fix.user.js`: the userscript.
+- Two test-only builds, used by the tests below.
 
-## Install privately (for the captain)
+## Install
 
-Firefox release builds only install signed add-ons permanently. There are three private options. Nothing here publishes the add-on or lists it anywhere.
+Pick one option. Don't install both the userscript and the add-on: the second copy just does nothing.
 
-### Option A: userscript in Violentmonkey (simplest, no account, recommended to start)
+### Option 1: userscript (any browser, no signing)
 
-1. In Firefox, install Violentmonkey from its add-ons page: https://addons.mozilla.org/firefox/addon/violentmonkey/
-2. Build the userscript: `npm install && npm run build`. This writes `dist/shorts-fix.user.js`.
-3. Click the Violentmonkey toolbar icon, open the Dashboard, click **+**, then **New**.
-4. Replace the editor contents with the whole of `dist/shorts-fix.user.js`.
-5. Press **Ctrl+S**, then close the editor.
-   - From Windows, the file is at `\\wsl.localhost\<distro>\...\dist\shorts-fix.user.js`, or copy it somewhere first.
-6. Reload any open YouTube tab.
+1. Install a userscript manager: Violentmonkey (recommended) or Tampermonkey.
+2. Open the manager's dashboard and create a new script.
+3. Replace its contents with the whole of `dist/shorts-fix.user.js` and save.
+4. Reload any open YouTube tab.
 
-This lasts across restarts and needs no account. To update, repeat steps 2 to 5.
+The userscript works in both of the manager's injection modes. If YouTube's Content-Security-Policy stops the manager injecting into the page itself, the script reaches the page's objects from the manager's isolated context instead.
 
-### Option B: the real add-on, signed as "unlisted" by Mozilla (persistent, needs your own AMO account)
+### Option 2: Firefox, temporary load (for trying it out)
 
-Unlisted signing gives you a signed `.xpi` that only you have. It is not listed or searchable on addons.mozilla.org (AMO). Signing is automated and usually takes a few minutes.
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on…** and choose `dist/extension/manifest.json`.
 
-1. Sign in to https://addons.mozilla.org with your Firefox account.
+It stays until Firefox restarts. Firefox Developer Edition, Nightly and ESR can also keep unsigned add-ons permanently if you set `xpinstall.signatures.required` to `false`. Release Firefox ignores that setting.
+
+### Option 3: Firefox, permanent install through self-signing
+
+Release Firefox only keeps signed add-ons. You can have Mozilla sign your own copy as **unlisted**. It is then installable permanently, but not listed or searchable on addons.mozilla.org (AMO). This needs your own AMO account, and signing is automated, usually taking a few minutes.
+
+1. Sign in at https://addons.mozilla.org.
 2. Create API credentials at https://addons.mozilla.org/developers/addon/api/key/
-3. Build and sign:
+3. Change the add-on ID: set `browser_specific_settings.gecko.id` in `extension/manifest.json` to your own value, for example `shorts-fix@your-domain.example`. An ID belongs to whoever signs it first.
+4. Build and sign:
    ```sh
    npm install && npm run build
    npx --yes web-ext@8 sign --source-dir dist/extension --channel unlisted \
      --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET" --artifacts-dir dist
    ```
-4. In Firefox, open `about:addons`, click the gear icon, choose **Install Add-on From File…**, and pick the signed `.xpi` in `dist/`.
+5. In Firefox, open `about:addons`, click the gear icon, choose **Install Add-on From File…**, and pick the signed `.xpi` in `dist/`.
 
-Before each re-sign, bump `version` in both `extension/manifest.json` and `package.json`. The build refuses to run if they differ.
+To update, bump `version` in both `extension/manifest.json` and `package.json`, then sign again. The build stops if those two versions differ.
 
-Keep the userscript or the add-on, not both. If both are installed, the marker property makes the second copy do nothing.
+### Chrome / Edge: load unpacked (developer mode)
 
-### Option C: try it for one session (no signing)
+The same `dist/extension` is a Manifest V3 extension that Chromium browsers accept as it is. Its script runs in the page context (`"world": "MAIN"`), which needs Chrome/Edge 111 or newer.
 
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Click **Load Temporary Add-on…** and pick `dist/extension/manifest.json`.
+1. Open `chrome://extensions` (or `edge://extensions`).
+2. Turn on **Developer mode**.
+3. Click **Load unpacked** and choose the `dist/extension` folder.
 
-It is removed when Firefox restarts. Firefox Developer Edition, Nightly and ESR can also install unsigned builds permanently if you set `xpinstall.signatures.required=false`. Release Firefox ignores that pref.
+The browser may warn about the Firefox-only key `browser_specific_settings`. It is ignored and harmless.
 
-## How to verify
+Checked in Microsoft Edge 157 (Chromium), one run each:
+- **With the extension:** the script loaded and kept the flag off. Open A, Back, open B and three Down presses all stayed correct.
+- **Without it:** the bug showed on the first Down press.
 
-### Manually
+Google Chrome itself has not been tested. It uses the same engine and the same manifest rules.
 
-1. Open https://www.youtube.com/@MrBeast/shorts (any channel's Shorts tab works).
+## Check that it works
+
+### By hand
+
+1. Open a channel's Shorts tab, for example https://www.youtube.com/@MrBeast/shorts
 2. Click the first Short, press Back, then click the second Short.
-   - **Without the fix:** on most fresh page loads, Firefox shows the first Short's still image while the second one plays. Toggling fullscreen on the first Short before pressing Back makes it happen every time.
-   - **With the fix:** the second Short is on screen, with its title and buttons.
-3. Press Down and Up a few times. Each press moves exactly one Short.
+   - **Firefox without the fix:** on most page loads, you see the first Short's still image while the second one plays.
+   - **Chrome/Edge without the fix:** press Down once to see it.
+   - Toggling fullscreen on the first Short before pressing Back makes the bug show every time.
+3. With the fix, the second Short is on screen with its title and buttons. Each Down or Up press moves exactly one Short.
 
-### Automated
+### Automated test (Firefox)
 
-The test opens a new, visible Firefox window with a fresh throwaway profile, which it deletes afterwards. Audio is muted with `media.volume_scale=0.0`. It is driven over WebDriver BiDi on port 9557 (`FF_BIDI_PORT` overrides this). Under WSL it uses the Windows Firefox. Set `FIREFOX_BIN` to use another Firefox.
+The test drives a real, visible Firefox window over WebDriver BiDi on port 9557 (`FF_BIDI_PORT` overrides this).
+- It uses a brand-new temporary profile, deleted afterwards, and never touches your own profile.
+- Audio is muted with `media.volume_scale=0.0`.
+- On Linux it runs `firefox`. Under WSL it uses the Windows Firefox. Set `FIREFOX_BIN` to choose another.
 
-It performs the repro, then 13 × Down and 13 × Up.
-
-On Short A, before pressing Back, it calls YouTube's own `ytd-shorts.onFullscreenChange()`. A real fullscreen toggle runs the same handler, and automation cannot enter fullscreen without a user gesture. This re-arms the faulty branch.
-- **Why:** without this step the bug fired on most fresh page loads, but not all. Whether it fires depends on whether the one-shot branch already ran harmlessly while A was open.
-- **Effect:** the test reproduces the bug every time without the fix.
-- **Side benefit:** it also covers the fix's handling of a fullscreen re-arm.
-- **To skip it:** set `SHORTS_FULLSCREEN=0`.
-
-After each step it checks three things:
+It does the steps above, then 13 × Down and 13 × Up. After each step it checks three things:
 - The centred slot is the player's slot.
-- The player's video is the URL's video.
+- The player is playing the URL's video.
 - The view moved exactly one slot.
 
 ```sh
-npm run test:repro                    # with the add-on: expect all checks to pass
-node test/repro.mjs --mode none       # no add-on: expect FAIL (exit 1), which is the bug
-node test/repro.mjs --mode fallback   # watchdog only, primary fix off: expect pass
-node test/repro.mjs --mode userscript # the userscript build: expect pass
+npm run test:repro                    # with the add-on: all checks pass
+node test/repro.mjs --mode none       # no add-on: fails (exit 1), which is the bug
+node test/repro.mjs --mode fallback   # watchdog only, primary fix off: passes
+node test/repro.mjs --mode userscript # the userscript, run from an isolated context: passes
 npm run test:proof -- --repeat 2      # all four modes, checked against the expected results
 ```
 
-`--mode userscript` runs the built `dist/shorts-fix.user.js` as a Firefox isolated-world content script. That is how a userscript manager runs it when YouTube's strict Content-Security-Policy blocks injecting it into the page. In page mode it behaves the same as the add-on, which `--mode extension` tests.
+On the first Short, before pressing Back, the test calls YouTube's own `ytd-shorts.onFullscreenChange()`.
+- **What it does:** a real fullscreen toggle runs the same handler, and automation cannot enter fullscreen without a user gesture. It switches the faulty correction back on.
+- **Why:** this makes the bug appear every time without the fix.
+- **To skip it:** set `SHORTS_FULLSCREEN=0`.
+- Other options are listed at the top of `test/repro.mjs`.
 
-The full Violentmonkey install could not be automated, because WebDriver BiDi does not allow opening extension pages. After installing with Option A, confirm it by hand with the manual check above.
+**Results** (Firefox 160 on Windows, logged out), final 3 rounds:
+
+| Mode | Result |
+|---|---|
+| No add-on | failed every time, which is the bug |
+| Add-on | passed every time |
+| Watchdog only | passed every time |
+| Userscript | passed every time |
 
 ## Known limits
 
-- **Browsers:** tested in Firefox 160 on Windows, logged out, on one channel's Shorts grid (MrBeast). Not tested in Chrome, signed in, or on mobile (`m.youtube.com`).
-- **Real fullscreen:** a real fullscreen toggle was not exercised; the test calls YouTube's fullscreen handler instead.
-  - The primary fix turns off YouTube's one-time re-align after fullscreen.
-  - YouTube's resize handler still re-aligns the view after a size change, and the watchdog catches a wrong slot.
-  - Watch for a view that is a few pixels off after leaving fullscreen.
-- **Violentmonkey:** the install path itself was not automated; see "How to verify".
-- **Occasional ignored Up key in testing:** during development, in 4 of about 22 test runs with a fix build, one Up press after the 13th Down did not move the view. The view and the player stayed matched, so this was not the wrong-video bug.
-  - In those runs the watchdog made no correction, and no mechanism linking it to the fix was found.
-  - It did not recur in the 12 runs after that: 3 with diagnostics plus the final 9 with a fix build.
-  - If you ever see a key press ignored with the add-on but never without it, report it.
-- **YouTube changes:** YouTube changes its front end often. If it renames the flag, the selectors or the slot layout, the script stops doing anything rather than breaking the page. The automated test will show that as the bug returning.
+- **Tested setup:** tested only logged out, on one channel's Shorts tab. Signed-in use, mobile (`m.youtube.com`) and Google Chrome are untested.
+- **Fullscreen:** a real fullscreen toggle was not tested. The fix turns off YouTube's one-time re-align after fullscreen.
+  - YouTube's resize handler and the watchdog still keep the right Short on screen.
+  - The view might sit a few pixels off after leaving fullscreen.
+- **Userscript managers:** installing through a userscript manager's own UI was not automated. Use the manual check above.
+- **Occasional ignored Up key in testing:** during development, a handful of test runs with the fix had one Up press, right after the 13th Down, that did not move the view. The view and the player stayed matched, so it was not the wrong-video bug.
+  - The watchdog had made no correction in those runs, and no link to the fix was found.
+  - It did not recur in the later runs.
+- **YouTube updates:** YouTube changes its front end often. If it renames the flag, the selectors or the slot layout, the script stops acting rather than breaking anything. The automated test will show that as the bug coming back.
 
-## Packaging for a later public release
+## Repository layout
 
-1. Choose a license (see `LICENSE`) and add the `LICENSE` text.
-2. Bump the version in `extension/manifest.json` and `package.json`.
-3. `npm run package` builds a `.zip` in `dist/` (named from the add-on name and version) with `web-ext build`. Run `npx web-ext lint --source-dir dist/extension` first.
-4. Firefox: submit the zip on AMO as a listed add-on, or run `web-ext sign --channel listed`.
-   - The extension ID (`browser_specific_settings.gecko.id`) is permanent once used for signing. Change it before the first signing if you want a different one.
-   - AMO may ask for the source. `src/` plus `scripts/build.mjs` is enough, because the build is a plain copy with no minification.
-5. Chrome Web Store (optional): the same `dist/extension` is a valid MV3 extension. Chrome warns about, and ignores, `browser_specific_settings`. It has not been tested in Chrome.
-6. Userscript: `dist/shorts-fix.user.js` can be posted to Greasy Fork or a GitHub release.
+```
+src/shorts-fix.js          all of the fix logic
+extension/manifest.json    Manifest V3 (Firefox 140+, Chromium 111+)
+scripts/build.mjs          builds dist/extension, dist/shorts-fix.user.js and two test-only builds
+test/repro.mjs             visible-browser Firefox reproduction test
+test/proof.mjs             runs every test mode and checks each gives the expected result
+```
+
+## Releasing
+
+1. Bump the version in `extension/manifest.json` and `package.json`.
+2. Check the add-on: `npm run build && npx --yes web-ext@8 lint --source-dir dist/extension`
+3. Package it: `npm run package` writes a `.zip` to `dist/` using `web-ext build`.
+4. **Firefox:** submit the zip on AMO as a listed add-on, or run `web-ext sign --channel listed`.
+   - The ID in `browser_specific_settings.gecko.id` is permanent once signed.
+   - AMO may ask for source code. This repository is enough, because the build only copies files and does not minify.
+5. **Chrome Web Store / Edge Add-ons (optional):** upload the same zip.
+6. **Userscript:** publish `dist/shorts-fix.user.js`, for example on Greasy Fork or as a GitHub release asset.
+
+## License
+
+See [LICENSE](LICENSE).

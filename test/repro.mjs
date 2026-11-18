@@ -44,7 +44,6 @@ const STEPS = Number(process.env.SHORTS_STEPS || 13);
 const TRACE = process.env.SHORTS_TRACE === '1'; // log the open-B phase every ~150 ms
 const FULLSCREEN = process.env.SHORTS_FULLSCREEN !== '0'; // set 0 to skip the re-arm step on A
 if (!['extension', 'none', 'fallback', 'userscript'].includes(MODE)) { console.error('bad --mode'); process.exit(2); }
-if (PORT === 9333) { console.error('port 9333 is reserved'); process.exit(2); }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const WIN_FF = '/mnt/c/Program Files/Mozilla Firefox/firefox.exe';
