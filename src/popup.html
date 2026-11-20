@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>YouTube Shorts &amp; Lag Fix</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 14px 16px; min-width: 260px; }
+  h1 { font-size: 15px; margin: 0 0 10px; }
+  label { display: flex; align-items: center; gap: 8px; }
+  .row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  input[type=range] { flex: 1; }
+  output { min-width: 3ch; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  p { margin: 10px 0 0; color: GrayText; font-size: 12px; }
+  .off .row { opacity: 0.45; }
+</style>
+</head>
+<body>
+<h1>Refresh YouTube to free memory</h1>
+<label><input type="checkbox" id="enabled"> Reload after a number of videos</label>
+<div class="row">
+  <input type="range" id="threshold" aria-label="Videos before reloading">
+  <output id="value" for="threshold"></output>
+</div>
+<p id="hint"></p>
+<script src="refresh-core.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>

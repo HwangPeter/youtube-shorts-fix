@@ -1,6 +1,8 @@
-# YouTube Shorts Wrong-Video Fix
+# YouTube Shorts & Lag Fix
 
-A small browser add-on, also built as a userscript, that fixes YouTube Shorts showing or playing the wrong video. Normal Shorts scrolling is unchanged.
+A small browser add-on that does two things on YouTube:
+- **Shorts fix:** stops YouTube Shorts showing or playing the wrong video. Normal Shorts scrolling is unchanged. This part is also built as a userscript.
+- **Lag fix:** stops long YouTube sessions getting slow by reloading the page every 40 videos (adjustable), between two videos. See [Lag fix](#lag-fix-reload-every-n-videos).
 
 This project is not affiliated with YouTube or Google.
 
@@ -91,10 +93,24 @@ All the logic is in `src/shorts-fix.js`, which runs inside the YouTube page.
      - `__ytShortsFixCorrections` counts watchdog corrections. Read it in the browser console to see whether the watchdog has acted.
      - `__ytShortsFixEntryCorrections` counts entry-guard corrections.
 
+## Lag fix: reload every N videos
+
+A long YouTube session gets slower and slower. YouTube is a single-page app, and the tab's memory grows by roughly 80 MB for every video you open. That rate was measured in Firefox over 24 hours, and in one long session the tab reached 8.4 GB. Only a real page load gives that memory back.
+
+So the add-on counts the distinct videos the tab opens, both `/watch?v=` videos and `/shorts/` Shorts. Each video counts once, however often you return to it. After 40 videos it loads the next video you open in a fresh page:
+- **It lands between videos.** It waits for the navigation to the next new video after the count is reached, waits 1 s for that video to load, then loads the same URL again with `location.replace`. Back and Forward history stay as they were.
+- **It keeps your place.** On `/watch` pages it adds `&t=<seconds>s` when the video is at least 1 s in, and keeps the other URL parameters, such as a playlist. It ignores the time while an ad is playing.
+- **It waits when the time is not right.** That means while you are typing in a box (search, comments) or the tab is hidden, and while the page is in fullscreen, up to 1.5 × the setting. Each time, it tries again at the next new video.
+- After the reload the count starts again.
+
+**Setting.** Click the add-on's toolbar button, or open its options in `about:addons`. A slider sets the number of videos, from 10 to 100 in steps of 5, with the current number shown next to it. A checkbox turns the reload off. Changes apply at once to open YouTube tabs.
+
+The logic is in `src/refresh-core.js`. The content script is `src/refresh.js`, which runs in the add-on's isolated world, separate from the Shorts fix. The settings page is `src/popup.html` and `src/popup.js`. The userscript does not include the lag fix.
+
 ### Privacy and permissions
 
-- No network requests, storage, messaging, analytics or data collection.
-- The add-on asks for no permissions. Its only site access is `https://www.youtube.com/*` and `https://m.youtube.com/*`, where its script runs.
+- No network requests, messaging, analytics or data collection.
+- The add-on's only permission is `storage`, used to keep the lag fix setting on your computer (`storage.local`). Its only site access is `https://www.youtube.com/*` and `https://m.youtube.com/*`, where its scripts run.
 - The manifest declares `data_collection_permissions: none` for Firefox.
 
 ## Build
@@ -104,6 +120,7 @@ You need Node 18 or newer.
 ```sh
 npm install
 npm run build
+npm test        # unit tests for the lag fix logic
 ```
 
 This writes:
@@ -174,6 +191,15 @@ Google Chrome itself has not been tested. It uses the same engine and the same m
    - **Chrome/Edge without the fix:** press Down once to see it.
    - Toggling fullscreen on the first Short before pressing Back makes the bug show every time.
 3. With the fix, the second Short is on screen with its title and buttons. Each Down or Up press moves exactly one Short.
+
+### Lag fix test (Firefox)
+
+`npm run test:refresh` runs `test/refresh-e2e.mjs`. It uses the same kind of throwaway, muted Firefox profile as the test below, on port 9558. It takes about 3 minutes.
+- It checks that the settings page shows 40, then opens a Short, watches 3 and sets the slider to 10 while the YouTube tab is open.
+- Then the page must not reload up to the 10th Short, and must reload on the 11th, on that Short.
+- With the setting off, 12 more Shorts must not cause a reload.
+- With it back on, it follows 10 related `/watch` videos and seeks the 11th to 60 s at once. The page must reload on that video with `t=60s`, and the player must be at 60 s.
+- Firefox starts with `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1` so the test can use the settings page, which a test-only background script opens in a tab.
 
 ### Automated test (Firefox)
 
@@ -250,14 +276,21 @@ On the first Short, before pressing Back, the test calls YouTube's own `ytd-shor
   - The watchdog's correction count rises with each ignored press, and the player is usually buffering. The likely cause is that YouTube's move stalls before it moves the player, and the watchdog then scrolls back to the player's slot. Not yet fixed.
 - **Forced race in tests:** the bug depends on timing, so the `entry` scenario and `SHORTS_STRESS=1` force it with synthetic scroll events, which real use does not fire. A passing plain `channel` run proves little on its own.
 - **Entry guard window:** the guard is on for at most 10 s after opening a Short, and off from your first input. A wrong load from a scroll event outside that window is not prevented.
+- **Lag fix playback after the reload:** in the automated test, Firefox's window does not have the OS focus. There YouTube does not start playback on any fresh page load, with or without the add-on, so the test could not check that the video plays on after the reload. In a normal window YouTube may start it, or it may wait at the right video and time for you to press play.
+- **Lag fix memory:** the 40-video default comes from the 24-hour measurement above. The add-on does not measure memory itself.
 - **YouTube updates:** YouTube changes its front end often. If it renames the flag, the selectors or the slot layout, the script stops acting rather than breaking anything. The automated test will show that as the bug coming back.
 
 ## Repository layout
 
 ```
-src/shorts-fix.js          all of the fix logic
+src/shorts-fix.js          all of the Shorts fix logic
+src/refresh-core.js        lag fix logic (counting, when to reload, the reload URL, settings)
+src/refresh.js             lag fix content script
+src/popup.html, popup.js   lag fix settings (toolbar popup and options page)
 extension/manifest.json    Manifest V3 (Firefox 140+, Chromium 111+)
 scripts/build.mjs          builds dist/extension, dist/shorts-fix.user.js and two test-only builds
+test/refresh-core.test.mjs lag fix unit tests (npm test)
+test/refresh-e2e.mjs       lag fix test in a real Firefox (npm run test:refresh)
 test/repro.mjs             visible-browser Firefox reproduction test
 test/proof.mjs             runs every test mode and checks each gives the expected result
 ```

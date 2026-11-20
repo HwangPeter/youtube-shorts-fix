@@ -1,16 +1,28 @@
 {
   "manifest_version": 3,
-  "name": "Shorts Wrong-Video Fix",
-  "version": "0.1.1",
-  "description": "Fixes YouTube Shorts showing the previous Short's still frame while the correct Short plays off-screen.",
+  "name": "YouTube Shorts & Lag Fix",
+  "version": "0.1.2",
+  "description": "Fixes YouTube Shorts showing the wrong video, and stops long YouTube sessions lagging by reloading the page every N videos to free memory.",
+  "permissions": ["storage"],
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*", "https://m.youtube.com/*"],
       "js": ["shorts-fix.js"],
       "run_at": "document_start",
       "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.youtube.com/*", "https://m.youtube.com/*"],
+      "js": ["refresh-core.js", "refresh.js"]
     }
   ],
+  "action": {
+    "default_title": "YouTube Shorts & Lag Fix settings",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "popup.html"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "shorts-wrong-video-fix@local",

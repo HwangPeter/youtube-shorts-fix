@@ -1,12 +1,14 @@
 {
   "name": "yt-shorts-fix",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "license": "MIT",
-  "description": "Fixes YouTube Shorts showing the previous Short's still frame while the correct Short plays off-screen.",
+  "description": "Fixes YouTube Shorts showing the wrong video, and stops long YouTube sessions lagging by reloading the page every N videos to free memory.",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:refresh": "node scripts/build.mjs && node test/refresh-e2e.mjs",
     "test:repro": "node scripts/build.mjs && node test/repro.mjs",
     "test:proof": "node scripts/build.mjs && node test/proof.mjs",
     "package": "node scripts/build.mjs && npx --yes web-ext@8 build --source-dir dist/extension --artifacts-dir dist --overwrite-dest"
