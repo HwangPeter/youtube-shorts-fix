@@ -21,6 +21,8 @@ var YtRefreshCore = (() => {
   const STEP = 5;
   const FULLSCREEN_GRACE = 1.5;
   const KEYS = { enabled: 'refreshEnabled', threshold: 'refreshThreshold' };
+  // Messages from the popup to the content script in the active tab.
+  const MESSAGES = { ping: 'ytRefreshPing', refreshNow: 'ytRefreshNow' };
 
   // The video id in a /watch?v=<id> or /shorts/<id> URL, else null.
   const videoIdFromUrl = (href) => {
@@ -49,6 +51,11 @@ var YtRefreshCore = (() => {
     return { enabled: r[KEYS.enabled] !== false, threshold: t };
   };
 
+  // The popup's explanation of the setting.
+  const hintText = ({ enabled, threshold }) => (enabled
+    ? `After ${threshold} videos, the next video opens in a fresh session. YouTube's memory use grows with every video until the page is reloaded.`
+    : 'YouTube is never reloaded.');
+
   // Current settings from extension storage, kept up to date as the popup
   // changes them. api: the browser/chrome extension namespace, or undefined.
   const createSettingsStore = (api) => {
@@ -70,9 +77,13 @@ var YtRefreshCore = (() => {
 
   // env: getSettings() -> {enabled, threshold}; isUnsafe() -> null or
   // 'typing' | 'hidden' | 'fullscreen'; getCurrentTime() -> seconds;
-  // refresh(url) loads url in a fresh page.
+  // refresh(url, { now }) loads url in a fresh page; now: at once, with no
+  // wait for the video to settle.
   // onUrl(href) returns 'ignored' (not a video), 'seen', 'counted',
   // 'deferred' or 'refreshed'.
+  // refreshNow(href) is the popup's "Start fresh session now": it reloads
+  // href at once, whatever the count, setting or safety checks, and starts
+  // the count again.
   const createRefresher = (env) => {
     let seen = new Set();
     const onUrl = (href) => {
@@ -89,11 +100,17 @@ var YtRefreshCore = (() => {
       env.refresh(url);
       return 'refreshed';
     };
-    return { onUrl, count: () => seen.size };
+    const refreshNow = (href) => {
+      const url = buildRefreshUrl(href, videoIdFromUrl(href) ? env.getCurrentTime() : 0);
+      seen = new Set();
+      env.refresh(url, { now: true });
+      return 'refreshed';
+    };
+    return { onUrl, refreshNow, count: () => seen.size };
   };
 
   return {
-    DEFAULT_THRESHOLD, MIN_THRESHOLD, MAX_THRESHOLD, STEP, KEYS,
-    videoIdFromUrl, buildRefreshUrl, normalizeSettings, createSettingsStore, createRefresher,
+    DEFAULT_THRESHOLD, MIN_THRESHOLD, MAX_THRESHOLD, STEP, KEYS, MESSAGES,
+    videoIdFromUrl, buildRefreshUrl, normalizeSettings, hintText, createSettingsStore, createRefresher,
   };
 })();

@@ -13,6 +13,8 @@
   output { min-width: 3ch; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
   p { margin: 10px 0 0; color: GrayText; font-size: 12px; }
   .off .row { opacity: 0.45; }
+  .now { margin-top: 14px; border-top: 1px solid color-mix(in srgb, GrayText 35%, transparent); padding-top: 12px; }
+  button { font: inherit; padding: 4px 10px; }
 </style>
 </head>
 <body>
@@ -23,6 +25,10 @@
   <output id="value" for="threshold"></output>
 </div>
 <p id="hint"></p>
+<div class="now">
+  <button type="button" id="refresh-now">Start fresh session now</button>
+  <p id="refresh-note" hidden></p>
+</div>
 <script src="refresh-core.js"></script>
 <script src="popup.js"></script>
 </body>

@@ -1,7 +1,7 @@
 // End-to-end test of the refresh-every-N-videos feature in a real Firefox.
 //
 //   npm run test:refresh            (builds, then runs this)
-//   node test/refresh-e2e.mjs [--out DIR]
+//   node test/refresh-e2e.mjs [--out DIR] [--only button]
 //   env: FF_BIDI_PORT (default 9558), FIREFOX_BIN, SHORTS_CHANNEL
 //
 // Same launch rules as test/repro.mjs: a brand-new throwaway profile (deleted
@@ -23,6 +23,12 @@
 //    keep the video and resume at that time (t=60s or a little more). If an ad
 //    is playing the seek is not possible, and the timestamp check is skipped
 //    with a NOTE.
+// 4. "Start fresh session now": with the YouTube tab active, reload the
+//    popup page (it is a background tab) and click its button: the YouTube
+//    tab must reload at once on the same video, keeping the time with t=.
+//    Before that, while the popup's own tab is active, the button must be
+//    disabled with a note, and the popup must say "fresh session".
+// --only button runs the popup checks and section 4 alone (about 30 s).
 // Playback after a reload is checked only when a page the test loads itself
 // starts playing: in a window without the OS focus YouTube does not start
 // playback on fresh page loads at all, with or without the add-on.
@@ -38,6 +44,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : def; };
 const OUT = opt('out', null);
+const ONLY = opt('only', null); // 'button': only the popup checks and section 4
 const PORT = Number(process.env.FF_BIDI_PORT || 9558);
 const CHANNEL = process.env.SHORTS_CHANNEL || 'https://www.youtube.com/@MrBeast/shorts';
 const LOW = 10;
@@ -177,149 +184,196 @@ try {
     min: document.getElementById('threshold').min, max: document.getElementById('threshold').max,
   }));
   expect(def.enabled && def.value === '40' && def.min === '10' && def.max === '100', 'popup default', JSON.stringify(def));
+  const btn0 = await popup.evaluate(() => ({
+    hint: document.getElementById('hint').textContent,
+    label: document.getElementById('refresh-now').textContent,
+    disabled: document.getElementById('refresh-now').disabled,
+    note: document.getElementById('refresh-note').hidden ? null : document.getElementById('refresh-note').textContent,
+  }));
+  expect(/the next video opens in a fresh session\./.test(btn0.hint), 'popup says "fresh session"', JSON.stringify(btn0.hint));
+  expect(btn0.label === 'Start fresh session now' && btn0.disabled && !!btn0.note,
+    'button disabled with a note while a non-YouTube tab is active', JSON.stringify(btn0));
 
-  // ---- 1. Shorts, threshold changed live from 40 to 10 ----------------------
-  await yt.bringToFront();
-  await yt.goto(CHANNEL, { waitUntil: 'load', timeout: 90000 });
-  await sleep(4000);
-  const first = await yt.evaluate(() => [...document.querySelectorAll('a[href*="/shorts/"]')]
-    .map((a) => a.getAttribute('href')).find((h) => /^\/shorts\/[^/?&]+/.test(h)));
-  if (!first) throw new Error('no Short found on the channel grid');
-  await yt.goto(`https://www.youtube.com${first}`, { waitUntil: 'load', timeout: 90000 });
-  let s = await settle(yt, 4000);
-  await mark(yt, 'session1');
-  // Baseline: whether a page the test loads itself starts playing. In an
-  // automated window that does not have the OS focus, YouTube does not start
-  // playback on a fresh page load at all, add-on or not.
-  const baseShort = (await yt.evaluate(STATE)).playing;
-  say('baseline: a directly loaded Short plays:', baseShort);
-  const origin1 = s.timeOrigin;
-  const seen = new Set([s.urlId]);
-  say('start', JSON.stringify(s));
-  const down = async () => {
-    await yt.keyboard.press('ArrowDown');
-    return settle(yt, 2500);
-  };
-  let presses = 0;
-  while (seen.size < 3 && presses++ < 15) { s = await down(); seen.add(s.urlId); }
-  expect(seen.size === 3 && s.timeOrigin === origin1, 'watched 3 Shorts, no reload', `seen=${seen.size}`);
-
-  const r1 = await setPopup(popup, { threshold: LOW });
-  expect(r1.shown.value === String(LOW) && r1.stored.refreshThreshold === LOW, `popup slider set to ${LOW} and saved`);
-  await yt.bringToFront();
-  await sleep(500);
-
-  presses = 0;
-  let reloaded = null;
-  while (!reloaded && presses++ < 40) {
-    const before = seen.size;
-    await yt.keyboard.press('ArrowDown');
-    await sleep(2500);
-    s = await settle(yt, 1500);
-    if (s.timeOrigin !== origin1) { reloaded = s; break; }
-    seen.add(s.urlId);
-    if (seen.size !== before) say(`  short ${seen.size} ${s.urlId} (same page)`);
-    if (seen.size > LOW + 1) break;
-  }
-  expect(!!reloaded, `fresh page load after the ${LOW}th Short`, JSON.stringify(reloaded || s));
-  if (reloaded) {
-    expect(seen.size === LOW, `no reload up to Short ${LOW}`, `distinct before reload=${seen.size}`);
-    expect(reloaded.marker === null, 'old page gone (test marker cleared)');
-    expect(!seen.has(reloaded.urlId) && reloaded.urlId && reloaded.playerId === reloaded.urlId,
-      'reloaded on the next (11th) Short, its player on it', `url=${reloaded.urlId} player=${reloaded.playerId}`);
-    await sleep(2000);
-    const p = await yt.evaluate(STATE);
-    if (baseShort) expect(p.playing === true, 'Short plays after the reload', `playing=${p.playing}`);
-    else say(`NOTE playback after the reload not checked: fresh loads do not autoplay in this window (playing=${p.playing})`);
-  }
-  if (OUT) await yt.screenshot({ path: path.join(OUT, 'shorts-after-reload.png') }).catch(() => {});
-
-  // ---- 2. Off: no reload ----------------------------------------------------
-  const r2 = await setPopup(popup, { enabled: false });
-  expect(r2.shown.value === 'Off' && r2.stored.refreshEnabled === false, 'popup set to Off and saved');
-  await yt.bringToFront();
-  await sleep(500);
-  s = await yt.evaluate(STATE);
-  await mark(yt, 'session2');
-  const origin2 = s.timeOrigin;
-  const seen2 = new Set([s.urlId]);
-  presses = 0;
-  while (seen2.size < LOW + 2 && presses++ < 40) { s = await down(); seen2.add(s.urlId); if (s.timeOrigin !== origin2) break; }
-  expect(seen2.size >= LOW + 2 && s.timeOrigin === origin2 && s.marker === 'session2', `Off: ${seen2.size} Shorts, no reload`);
-
-  // ---- 3. /watch with timestamp ---------------------------------------------
-  const r3 = await setPopup(popup, { enabled: true });
-  expect(r3.shown.value === String(LOW) && r3.stored.refreshEnabled === true, `popup back on at ${LOW}`);
-  await yt.bringToFront();
-  await yt.goto('https://www.youtube.com/watch?v=jNQXAC9IVRw', { waitUntil: 'load', timeout: 90000 }); // "Me at the zoo"
-  s = await settle(yt, 5000);
-  await mark(yt, 'session3');
-  await sleep(2000);
-  const baseWatch = (await yt.evaluate(STATE)).playing;
-  say('baseline: a directly loaded /watch video plays:', baseWatch);
-  const origin3 = s.timeOrigin;
-  const seen3 = new Set([s.urlId]);
-  say('watch start', JSON.stringify(s));
-  // Follow a related video the user has not opened yet, by clicking its link
-  // (YouTube handles that as an in-page navigation).
-  const follow = () => yt.evaluate((seenIds) => {
-    const links = [...document.querySelectorAll('#secondary a[href^="/watch?v="], #related a[href^="/watch?v="]')];
-    for (const a of links) {
-      const id = new URL(a.href).searchParams.get('v');
-      if (id && !seenIds.includes(id) && !new URL(a.href).searchParams.has('list')) { a.click(); return id; }
-    }
-    return null;
-  }, [...seen3]);
-  let watchReload = null;
-  let seekedTo = null;
-  let waitWhy = '';
-  for (let k = 0; k < LOW + 3 && !watchReload; k++) {
-    const id = await follow();
-    if (!id) { say('  no related link to follow'); break; }
-    if (seen3.size === LOW) {
-      // The reload is due on this navigation, about 1 s after it lands. Seek
-      // as soon as the watch page shows the new video, before the reload.
-      for (let i = 0; i < 40; i++) {
-        const r = await yt.evaluate((want) => {
-          const flexy = document.querySelector('ytd-watch-flexy');
-          const v = document.querySelector('#movie_player video');
-          if (flexy?.getAttribute('video-id') !== want) return { wait: `flexy video-id ${flexy?.getAttribute('video-id')}` };
-          if (!v) return { wait: 'no video' };
-          if (document.querySelector('#movie_player.ad-showing')) return { wait: 'ad' };
-          try { document.querySelector('#movie_player').seekTo(60, true); } catch (e) { v.currentTime = 60; }
-          return { seeked: Math.round(v.currentTime) };
-        }, id).catch((e) => ({ wait: 'error ' + e.message.slice(0, 80) }));
-        if (r.seeked !== undefined) { seekedTo = r.seeked; break; }
-        waitWhy = r.wait;
-        await sleep(50);
-      }
-      say(`  video ${seen3.size + 1} ${id}: seek result ${seekedTo}${seekedTo === null ? ` (${waitWhy})` : ''}`);
-    }
+  let s;
+  if (ONLY !== 'button') {
+    // ---- 1. Shorts, threshold changed live from 40 to 10 ----------------------
+    await yt.bringToFront();
+    await yt.goto(CHANNEL, { waitUntil: 'load', timeout: 90000 });
+    await sleep(4000);
+    const first = await yt.evaluate(() => [...document.querySelectorAll('a[href*="/shorts/"]')]
+      .map((a) => a.getAttribute('href')).find((h) => /^\/shorts\/[^/?&]+/.test(h)));
+    if (!first) throw new Error('no Short found on the channel grid');
+    await yt.goto(`https://www.youtube.com${first}`, { waitUntil: 'load', timeout: 90000 });
     s = await settle(yt, 4000);
-    if (s.timeOrigin !== origin3) { watchReload = { ...s, expectedId: id }; break; }
-    seen3.add(s.urlId);
-    say(`  video ${seen3.size} ${s.urlId} (same page)`);
-  }
-  expect(!!watchReload, `/watch: fresh page load after the ${LOW}th video`, JSON.stringify(watchReload || s));
-  if (watchReload) {
-    expect(seen3.size === LOW, `/watch: no reload up to video ${LOW}`, `distinct before reload=${seen3.size}`);
-    expect(watchReload.urlId === watchReload.expectedId && watchReload.marker === null, '/watch: reloaded on the current video',
-      `url=${watchReload.urlId} clicked=${watchReload.expectedId}`);
-    if (seekedTo !== null && seekedTo >= 59) {
-      const tSec = parseInt(watchReload.t || '0', 10);
-      await sleep(3000);
-      const after = await yt.evaluate(STATE);
-      expect(tSec >= 60 && tSec <= 70 && after.time >= 59, '/watch: timestamp kept', `t=${watchReload.t} playerTime=${after.time} ad=${after.ad}`);
-      await sleep(2000);
-      const later = await yt.evaluate(STATE);
-      const detail = `playing=${later.playing} time ${after.exactTime?.toFixed(1)} -> ${later.exactTime?.toFixed(1)} ad=${later.ad}`;
-      if (baseWatch) expect(later.playing === true && later.exactTime > after.exactTime, '/watch: plays on after the reload', detail);
-      else say(`NOTE /watch playback after the reload not checked: fresh loads do not autoplay in this window (${detail})`);
-    } else {
-      say(`NOTE /watch timestamp not checked: could not seek before the reload (${seekedTo}; an ad may have been playing)`);
+    await mark(yt, 'session1');
+    // Baseline: whether a page the test loads itself starts playing. In an
+    // automated window that does not have the OS focus, YouTube does not start
+    // playback on a fresh page load at all, add-on or not.
+    const baseShort = (await yt.evaluate(STATE)).playing;
+    say('baseline: a directly loaded Short plays:', baseShort);
+    const origin1 = s.timeOrigin;
+    const seen = new Set([s.urlId]);
+    say('start', JSON.stringify(s));
+    const down = async () => {
+      await yt.keyboard.press('ArrowDown');
+      return settle(yt, 2500);
+    };
+    let presses = 0;
+    while (seen.size < 3 && presses++ < 15) { s = await down(); seen.add(s.urlId); }
+    expect(seen.size === 3 && s.timeOrigin === origin1, 'watched 3 Shorts, no reload', `seen=${seen.size}`);
+
+    const r1 = await setPopup(popup, { threshold: LOW });
+    expect(r1.shown.value === String(LOW) && r1.stored.refreshThreshold === LOW, `popup slider set to ${LOW} and saved`);
+    await yt.bringToFront();
+    await sleep(500);
+
+    presses = 0;
+    let reloaded = null;
+    while (!reloaded && presses++ < 40) {
+      const before = seen.size;
+      await yt.keyboard.press('ArrowDown');
+      await sleep(2500);
+      s = await settle(yt, 1500);
+      if (s.timeOrigin !== origin1) { reloaded = s; break; }
+      seen.add(s.urlId);
+      if (seen.size !== before) say(`  short ${seen.size} ${s.urlId} (same page)`);
+      if (seen.size > LOW + 1) break;
     }
+    expect(!!reloaded, `fresh page load after the ${LOW}th Short`, JSON.stringify(reloaded || s));
+    if (reloaded) {
+      expect(seen.size === LOW, `no reload up to Short ${LOW}`, `distinct before reload=${seen.size}`);
+      expect(reloaded.marker === null, 'old page gone (test marker cleared)');
+      expect(!seen.has(reloaded.urlId) && reloaded.urlId && reloaded.playerId === reloaded.urlId,
+        'reloaded on the next (11th) Short, its player on it', `url=${reloaded.urlId} player=${reloaded.playerId}`);
+      await sleep(2000);
+      const p = await yt.evaluate(STATE);
+      if (baseShort) expect(p.playing === true, 'Short plays after the reload', `playing=${p.playing}`);
+      else say(`NOTE playback after the reload not checked: fresh loads do not autoplay in this window (playing=${p.playing})`);
+    }
+    if (OUT) await yt.screenshot({ path: path.join(OUT, 'shorts-after-reload.png') }).catch(() => {});
+
+    // ---- 2. Off: no reload ----------------------------------------------------
+    const r2 = await setPopup(popup, { enabled: false });
+    expect(r2.shown.value === 'Off' && r2.stored.refreshEnabled === false, 'popup set to Off and saved');
+    await yt.bringToFront();
+    await sleep(500);
+    s = await yt.evaluate(STATE);
+    await mark(yt, 'session2');
+    const origin2 = s.timeOrigin;
+    const seen2 = new Set([s.urlId]);
+    presses = 0;
+    while (seen2.size < LOW + 2 && presses++ < 40) { s = await down(); seen2.add(s.urlId); if (s.timeOrigin !== origin2) break; }
+    expect(seen2.size >= LOW + 2 && s.timeOrigin === origin2 && s.marker === 'session2', `Off: ${seen2.size} Shorts, no reload`);
+
+    // ---- 3. /watch with timestamp ---------------------------------------------
+    const r3 = await setPopup(popup, { enabled: true });
+    expect(r3.shown.value === String(LOW) && r3.stored.refreshEnabled === true, `popup back on at ${LOW}`);
+    await yt.bringToFront();
+    await yt.goto('https://www.youtube.com/watch?v=jNQXAC9IVRw', { waitUntil: 'load', timeout: 90000 }); // "Me at the zoo"
+    s = await settle(yt, 5000);
+    await mark(yt, 'session3');
+    await sleep(2000);
+    const baseWatch = (await yt.evaluate(STATE)).playing;
+    say('baseline: a directly loaded /watch video plays:', baseWatch);
+    const origin3 = s.timeOrigin;
+    const seen3 = new Set([s.urlId]);
+    say('watch start', JSON.stringify(s));
+    // Follow a related video the user has not opened yet, by clicking its link
+    // (YouTube handles that as an in-page navigation).
+    const follow = () => yt.evaluate((seenIds) => {
+      const links = [...document.querySelectorAll('#secondary a[href^="/watch?v="], #related a[href^="/watch?v="]')];
+      for (const a of links) {
+        const id = new URL(a.href).searchParams.get('v');
+        if (id && !seenIds.includes(id) && !new URL(a.href).searchParams.has('list')) { a.click(); return id; }
+      }
+      return null;
+    }, [...seen3]);
+    let watchReload = null;
+    let seekedTo = null;
+    let waitWhy = '';
+    for (let k = 0; k < LOW + 3 && !watchReload; k++) {
+      const id = await follow();
+      if (!id) { say('  no related link to follow'); break; }
+      if (seen3.size === LOW) {
+        // The reload is due on this navigation, about 1 s after it lands. Seek
+        // as soon as the watch page shows the new video, before the reload.
+        for (let i = 0; i < 40; i++) {
+          const r = await yt.evaluate((want) => {
+            const flexy = document.querySelector('ytd-watch-flexy');
+            const v = document.querySelector('#movie_player video');
+            if (flexy?.getAttribute('video-id') !== want) return { wait: `flexy video-id ${flexy?.getAttribute('video-id')}` };
+            if (!v) return { wait: 'no video' };
+            if (document.querySelector('#movie_player.ad-showing')) return { wait: 'ad' };
+            try { document.querySelector('#movie_player').seekTo(60, true); } catch (e) { v.currentTime = 60; }
+            return { seeked: Math.round(v.currentTime) };
+          }, id).catch((e) => ({ wait: 'error ' + e.message.slice(0, 80) }));
+          if (r.seeked !== undefined) { seekedTo = r.seeked; break; }
+          waitWhy = r.wait;
+          await sleep(50);
+        }
+        say(`  video ${seen3.size + 1} ${id}: seek result ${seekedTo}${seekedTo === null ? ` (${waitWhy})` : ''}`);
+      }
+      s = await settle(yt, 4000);
+      if (s.timeOrigin !== origin3) { watchReload = { ...s, expectedId: id }; break; }
+      seen3.add(s.urlId);
+      say(`  video ${seen3.size} ${s.urlId} (same page)`);
+    }
+    expect(!!watchReload, `/watch: fresh page load after the ${LOW}th video`, JSON.stringify(watchReload || s));
+    if (watchReload) {
+      expect(seen3.size === LOW, `/watch: no reload up to video ${LOW}`, `distinct before reload=${seen3.size}`);
+      expect(watchReload.urlId === watchReload.expectedId && watchReload.marker === null, '/watch: reloaded on the current video',
+        `url=${watchReload.urlId} clicked=${watchReload.expectedId}`);
+      if (seekedTo !== null && seekedTo >= 59) {
+        const tSec = parseInt(watchReload.t || '0', 10);
+        await sleep(3000);
+        const after = await yt.evaluate(STATE);
+        expect(tSec >= 60 && tSec <= 70 && after.time >= 59, '/watch: timestamp kept', `t=${watchReload.t} playerTime=${after.time} ad=${after.ad}`);
+        await sleep(2000);
+        const later = await yt.evaluate(STATE);
+        const detail = `playing=${later.playing} time ${after.exactTime?.toFixed(1)} -> ${later.exactTime?.toFixed(1)} ad=${later.ad}`;
+        if (baseWatch) expect(later.playing === true && later.exactTime > after.exactTime, '/watch: plays on after the reload', detail);
+        else say(`NOTE /watch playback after the reload not checked: fresh loads do not autoplay in this window (${detail})`);
+      } else {
+        say(`NOTE /watch timestamp not checked: could not seek before the reload (${seekedTo}; an ad may have been playing)`);
+      }
+    }
+    if (OUT) await yt.screenshot({ path: path.join(OUT, 'watch-after-reload.png') }).catch(() => {});
   }
-  if (OUT) await yt.screenshot({ path: path.join(OUT, 'watch-after-reload.png') }).catch(() => {});
+
+  // ---- 4. Start fresh session now ------------------------------------------
+  await yt.bringToFront();
+  await yt.goto('https://www.youtube.com/watch?v=jNQXAC9IVRw', { waitUntil: 'load', timeout: 90000 });
+  s = await settle(yt, 5000);
+  await mark(yt, 'session4');
+  const seekTo = await yt.evaluate(() => {
+    if (document.querySelector('#movie_player.ad-showing')) return null;
+    try { document.querySelector('#movie_player').seekTo(10, true); } catch (e) { document.querySelector('#movie_player video').currentTime = 10; }
+    return 10;
+  }).catch(() => null);
+  await sleep(1000);
+  const before4 = await yt.evaluate(STATE);
+  await popup.evaluate(() => location.reload()).catch(() => {}); // BiDi's own reload waits for a load event a background tab may not report
+  await sleep(1500);
+  const btn4 = await popup.evaluate(() => ({
+    disabled: document.getElementById('refresh-now').disabled,
+    noteHidden: document.getElementById('refresh-note').hidden,
+  }));
+  expect(!btn4.disabled && btn4.noteHidden, 'button enabled while the YouTube tab is active', JSON.stringify(btn4));
+  const clickedAt = Date.now();
+  await popup.evaluate(() => document.getElementById('refresh-now').click()).catch(() => {}); // the popup closes itself
+  let fresh = null;
+  for (let i = 0; i < 20 && !fresh; i++) {
+    await sleep(250);
+    const st = await yt.evaluate(STATE).catch(() => null);
+    if (st && st.timeOrigin !== before4.timeOrigin) fresh = { ...st, ms: Date.now() - clickedAt };
+  }
+  expect(!!fresh && fresh.marker === null && fresh.urlId === before4.urlId,
+    'button: fresh page load at once, on the same video', JSON.stringify(fresh));
+  if (fresh && seekTo !== null && before4.time >= 10) {
+    const tSec = parseInt(fresh.t || '0', 10);
+    expect(tSec >= 10 && tSec <= before4.time + 3, 'button: time kept with t=', `t=${fresh.t} before=${before4.time}`);
+  } else if (fresh) say(`NOTE button timestamp not checked (seek=${seekTo} time=${before4.time} ad=${before4.ad})`);
+  if (OUT) await yt.screenshot({ path: path.join(OUT, 'after-fresh-session-button.png') }).catch(() => {});
 
   say(`RESULT refresh e2e: ${checks - failures}/${checks} checks passed`);
   exitCode = failures ? 1 : 0;

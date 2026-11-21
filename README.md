@@ -103,13 +103,16 @@ So the add-on counts the distinct videos the tab opens, both `/watch?v=` videos 
 - **It waits when the time is not right.** That means while you are typing in a box (search, comments) or the tab is hidden, and while the page is in fullscreen, up to 1.5 × the setting. Each time, it tries again at the next new video.
 - After the reload the count starts again.
 
-**Setting.** Click the add-on's toolbar button, or open its options in `about:addons`. A slider sets the number of videos, from 10 to 100 in steps of 5, with the current number shown next to it. A checkbox turns the reload off. Changes apply at once to open YouTube tabs.
+**Setting.** Click the add-on's toolbar button, or open its options in `about:addons`. A slider sets the number of videos, from 10 to 100 in steps of 5, with the current number shown next to it. Below it the popup says "After N videos, the next video opens in a fresh session." A checkbox turns the reload off. Changes apply at once to open YouTube tabs.
+
+**Start fresh session now.** A button in the popup reloads the YouTube tab you are on at once, without waiting for the count. It reloads the same way as the automatic reload, keeping your place with `t=` on `/watch` pages, and the count starts again. It works with the automatic reload turned off too. When the active tab is not a YouTube tab, as in `about:addons`, the button is greyed out with a short note.
 
 The logic is in `src/refresh-core.js`. The content script is `src/refresh.js`, which runs in the add-on's isolated world, separate from the Shorts fix. The settings page is `src/popup.html` and `src/popup.js`. The userscript does not include the lag fix.
 
 ### Privacy and permissions
 
-- No network requests, messaging, analytics or data collection.
+- No network requests, analytics or data collection.
+- The only messages are inside the add-on: when the popup opens it asks the active tab whether the add-on's YouTube script runs there, and the "Start fresh session now" button tells that script to reload.
 - The add-on's only permission is `storage`, used to keep the lag fix setting on your computer (`storage.local`). Its only site access is `https://www.youtube.com/*` and `https://m.youtube.com/*`, where its scripts run.
 - The manifest declares `data_collection_permissions: none` for Firefox.
 
@@ -199,6 +202,8 @@ Google Chrome itself has not been tested. It uses the same engine and the same m
 - Then the page must not reload up to the 10th Short, and must reload on the 11th, on that Short.
 - With the setting off, 12 more Shorts must not cause a reload.
 - With it back on, it follows 10 related `/watch` videos and seeks the 11th to 60 s at once. The page must reload on that video with `t=60s`, and the player must be at 60 s.
+- It then checks the "Start fresh session now" button. While the settings page's own tab is active, the button must be greyed out with a note. With the YouTube tab active, a click must reload that tab at once, on the same video with `t=`.
+- `npm run test:refresh:button` runs only the button checks (`--only button`), in about 30 s.
 - Firefox starts with `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1` so the test can use the settings page, which a test-only background script opens in a tab.
 
 ### Automated test (Firefox)
@@ -286,10 +291,11 @@ On the first Short, before pressing Back, the test calls YouTube's own `ytd-shor
 src/shorts-fix.js          all of the Shorts fix logic
 src/refresh-core.js        lag fix logic (counting, when to reload, the reload URL, settings)
 src/refresh.js             lag fix content script
-src/popup.html, popup.js   lag fix settings (toolbar popup and options page)
+src/popup.html, popup.js   lag fix settings and "Start fresh session now" (toolbar popup and options page)
 extension/manifest.json    Manifest V3 (Firefox 140+, Chromium 111+)
 scripts/build.mjs          builds dist/extension, dist/shorts-fix.user.js and two test-only builds
 test/refresh-core.test.mjs lag fix unit tests (npm test)
+test/popup.test.mjs        popup wording and "Start fresh session now" tests (npm test)
 test/refresh-e2e.mjs       lag fix test in a real Firefox (npm run test:refresh)
 test/repro.mjs             visible-browser Firefox reproduction test
 test/proof.mjs             runs every test mode and checks each gives the expected result

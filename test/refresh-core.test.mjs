@@ -178,3 +178,37 @@ test('settings store: works without a storage API', () => {
   const store = core.createSettingsStore(undefined);
   assert.deepEqual(plain(store.get()), { enabled: true, threshold: 40 });
 });
+
+test('refreshNow: reloads the current video at once and resets the count', () => {
+  const { r, state } = make({ enabled: true, threshold: 40 });
+  for (const id of ['a', 'b', 'c']) r.onUrl(W(id));
+  assert.equal(r.count(), 3);
+  state.time = 42.9;
+  state.unsafe = 'typing'; // the user asked for it: no deferral
+  assert.equal(r.refreshNow(W('c', '&list=PL1')), 'refreshed');
+  assert.equal(r.count(), 0);
+  assert.equal(state.refreshes.length, 1);
+  const u = new URL(state.refreshes[0]);
+  assert.equal(u.searchParams.get('v'), 'c');
+  assert.equal(u.searchParams.get('list'), 'PL1');
+  assert.equal(u.searchParams.get('t'), '42s');
+  // the old ids count again in the new session
+  assert.equal(r.onUrl(W('a')), 'counted');
+});
+
+test('refreshNow: works with the reload setting off and on non-video pages', () => {
+  const { r, state } = make({ enabled: false, threshold: 40 });
+  r.onUrl(S('a'));
+  assert.equal(r.refreshNow(S('a')), 'refreshed');
+  assert.equal(r.refreshNow('https://www.youtube.com/'), 'refreshed');
+  assert.deepEqual(state.refreshes, [S('a'), 'https://www.youtube.com/']);
+  assert.equal(r.count(), 0);
+});
+
+test('hintText: the popup wording', () => {
+  assert.equal(core.hintText({ enabled: true, threshold: 40 }),
+    "After 40 videos, the next video opens in a fresh session. YouTube's memory use grows with every video until the page is reloaded.");
+  assert.match(core.hintText({ enabled: true, threshold: 15 }), /^After 15 videos, the next video opens in a fresh session\./);
+  assert.doesNotMatch(core.hintText({ enabled: true, threshold: 15 }), /fresh page/);
+  assert.equal(core.hintText({ enabled: false, threshold: 40 }), 'YouTube is never reloaded.');
+});
