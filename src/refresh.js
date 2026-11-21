@@ -4,7 +4,9 @@
 //
 // It reads only the page URL, the focused element, fullscreen and visibility
 // state, ytd-watch-flexy's video-id attribute and the <video>'s current time.
-// The only thing it changes is the page address, when it reloads.
+// The only thing it changes is the page address, when it reloads. It also
+// answers the popup's messages: a ping (so the popup knows this tab is
+// YouTube) and "Start fresh session now", which reloads at once.
 (() => {
   'use strict';
   const core = globalThis.YtRefreshCore;
@@ -50,7 +52,14 @@
     getSettings: store.get,
     isUnsafe,
     getCurrentTime: () => currentTimeFor(core.videoIdFromUrl(location.href)),
-    refresh: () => {
+    refresh: (url, { now } = {}) => {
+      if (now) {
+        clearTimeout(pending);
+        pending = 0;
+        console.info('[shorts-fix] reloading YouTube in a fresh page, as asked from the popup:', url);
+        location.replace(url);
+        return;
+      }
       if (pending) return;
       pending = setTimeout(() => {
         // Recompute at the last moment: the time has moved on, and the user may
@@ -62,6 +71,14 @@
         location.replace(url);
       }, SETTLE_MS);
     },
+  });
+
+  api?.runtime?.onMessage?.addListener((msg, sender, sendResponse) => {
+    if (msg?.type === core.MESSAGES.ping) sendResponse({ ok: true });
+    else if (msg?.type === core.MESSAGES.refreshNow) {
+      sendResponse({ ok: true });
+      refresher.refreshNow(location.href);
+    }
   });
 
   let lastHref = '';
